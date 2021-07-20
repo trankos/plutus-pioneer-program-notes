@@ -17,14 +17,13 @@
 
 # Para qué sirve
 
-- En principio, _blockchain_, tiene diversas aplicaciones pero las que nos ocupa es la de construir un _libro de cuentas_ (_ledger_). Atendiendo a la traducción exacta del inglés, _libro mayor_, que se como define como 
+- En principio, _blockchain_, tiene diversas aplicaciones pero las que nos ocupa es la de construir un _libro de cuentas_ (_ledger_). Atendiendo a la traducción de ledger al esapañol, _libro mayor_, este se define como:
 
 > un libro que contiene todos los movimientos de todas las cuentas (de una empresa)
 
 que parece una definición de lo más apropiada.
 
-..* Para poder
-Es lo que se denomina _proof of work_ (_PoW_) o _proof of stake_ (_PoS_). Ambos son dos estrategias de validación de un registro que detallaré en otro apartado.
+
 # Enlaces
 
 - [Aquí empezó todo](https://nakamotoinstitute.org/bitcoin/)
