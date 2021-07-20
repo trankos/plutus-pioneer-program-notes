@@ -1,2 +1,2 @@
 # plutus-pioneer-program-notes
-Notes and comments about plutus pioneer program
+Notas y comentarios soble el programa para pioneros de plutus (plutus pioner program)
