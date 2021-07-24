@@ -519,7 +519,7 @@ scrAddress = scriptAddress . validator
   - [Entrada](./homework1_input.png)
 - Salida:
   - [Slot 11 tx0](./homework1_simulation_slot11_tx0.png)
-  - [Slot 11 tx1](/.homework1_simulation_slot11.tx1.png)
+  - [Slot 11 tx1](./homework1_simulation_slot11_tx1.png)
 
   - El resultado final es que Wallet 2 recupera su donación a Wallet 1, ya que este no la ha recuperado, y recibe la donación de Wallet 1.
 
