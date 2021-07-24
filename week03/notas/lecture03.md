@@ -235,7 +235,7 @@ give gp = do
 ```
 ### _grab_
 - Este _endpoint_ retira la donación si se cumplen las validaciones pertinentes.
-  - Aquí si se tiene en cuenta el _momento_ en el que recibe la transacción.
+  - Aquí si se tiene en cuenta el _momento_ en el que crea la transacción.
 ```haskell
 grab :: forall w s e. AsContractError e => Contract w s e ()
 grab = do
@@ -417,12 +417,143 @@ POSIXTime {getPOSIXTime = 1596059111000}
 - La simulación consiste en 3 donaciones:
   - De Wallet 1 a Wallet 2 (2): En los slots 10 y 20
   - De Wallet 1 a Wallet 3 (1): En el slot 20.
-![Datos de entrada](./input_vesting_simulation.png)
+![Datos de entrada](./vesting_simulation_input.png)
 
 - La simulación no funciona: "no gifts available"
   - Datos
+    Wallet 1: 21fe31dfa154a261626bf854046fd2271b7bed4b6abe45aa58877ef47f9721b9
     Wallet 2: 39f713d0a644253f04529421b9f51b9b08979d08295959c4f3990ee617f5139f
     Wallet 3: dac073e0123bdea59dd9b3bda9cf6037f63aca82627d7abcd5c4ac29dd74003e
-    Slot 10: 1596059101000
-    Slot 20: 1596059111000
-  - El problema está en la definición de la fecha límite: slotToBeginPOSIXTime devuelve POSIXTime (en MILISEGUNDOS) y el resultado de la función currentTime, que es POSIXTime también pero en SEGUNDOS. Debido a esto la comprobación de la fecha límite nunca se cumple ya que siempre es mayor que la fecha actual. No entiendo esta diferencia, ¿un problema de mi SO?
+    Slot 10: 1596059101000 -> 1596059101
+    Slot 20: 1596059111000 -> 1596059111
+  - El problema está en la definición de la fecha límite: slotToBeginPOSIXTime devuelve POSIXTime en MILISEGUNDOS y el resultado de la función currentTime, que es POSIXTime también pero en SEGUNDOS. Debido a esto la comprobación de la fecha límite nunca se cumple ya que siempre es mayor que la fecha actual. No entiendo esta diferencia, ¿un problema de mi SO?
+  - Con este cambio, introducir el tiempo en segundos, la simulación funciona correctamente.
+
+
+  ## Validaciones off-chain y on-chain
+  - En este ejemplo, la validación _off-chain_ (_grab_) que se ejecuta en el monedero, solo envía la transacción si esta es válida, es decir, si la fecha límite, _deadline_ se ha cumplido, y si es el beneficiario el que está generando la transacción, por tanto, con esta programación, el validador _on_chain_, siempre se cumple. Pero esto no tiene porqué ser así y alguien puede escribir otro código que no sea honesto.
+
+    > Hay que tener esto en cuenta siempre: las validaciones siempre _on_chain_.
+
+    > Es el mismo escenario de una arquitectura cliente-servidor: el servidor siempre debe comprobar que los datos son correctos y no esperar que el cliente sea honesto.
+
+
+    # Parameterized: Contratos parametrizados
+
+    - Partiendo del ejemplo anterior, _vesting.hs_, vamos a realizar algunas modificaciones para que la información del beneficiario y la fecha límite se incluya en el contrato mediante un parámetro. Es una generalización.
+    
+    ```haskell
+    data VestingParam = VestingParam
+    { beneficiary :: PubKeyHash
+    , deadline    :: POSIXTime
+    } deriving Show
+
+    PlutusTx.makeLift ''VestingParam
+
+    {-# INLINABLE mkValidator #-}
+    mkValidator :: VestingParam -> () -> () -> ScriptContext -> Bool
+    mkValidator p () () ctx = traceIfFalse "beneficiary's signature missing" signedByBeneficiary &&
+                              traceIfFalse "deadline not reached" deadlineReached
+      where
+        info :: TxInfo
+        info = scriptContextTxInfo ctx
+
+        signedByBeneficiary :: Bool
+        signedByBeneficiary = txSignedBy info $ beneficiary p
+
+        deadlineReached :: Bool
+        deadlineReached = contains (from $ deadline p) $ txInfoValidRange info
+
+    data Vesting
+    instance Scripts.ValidatorTypes Vesting where
+        type instance DatumType Vesting = ()
+        type instance RedeemerType Vesting = ()
+
+    typedValidator :: VestingParam -> Scripts.TypedValidator Vesting
+    typedValidator p = Scripts.mkTypedValidator @Vesting
+        ($$(PlutusTx.compile [|| mkValidator ||]) `PlutusTx.applyCode` PlutusTx.liftCode p)
+        $$(PlutusTx.compile [|| wrap ||])
+      where
+        wrap = Scripts.wrapValidator @() @()
+
+    validator :: VestingParam -> Validator
+    validator = Scripts.validatorScript . typedValidator
+
+    valHash :: VestingParam -> Ledger.ValidatorHash
+    valHash = Scripts.validatorHash . typedValidator
+
+    scrAddress :: VestingParam -> Ledger.Address
+    scrAddress = scriptAddress . validator
+    ```
+
+  - Primero definimos la estructura de información de los parámetros y modificamos la firma del validador.
+      - _Datum_ ya no es necesario -> ()
+      - _Redeemer_, igual que antes -> ()
+      - _ScriptContex_, igual que antes.
+      - Aparece un nuevo parámetro _VestingParam_, que sustituye al _Datum_ de la versión _vesting.hs_
+
+  - Explicación de como compilar el validador en Plutus: _lift code_: Permite compilar en Plutus instancias de datos. Es un tema complejo, mejor acudir al video: 1:03:00.
+
+
+## Simulación
+- Entrada
+  - La cronología es la misma que en el caso anterior.
+    [Entrada](./parameterized_simulation_input.png)
+    - La operación _grab_ tiene un parámetro nuevo, _gpDeadline_.
+- Salida
+  - Cada operación _give_ genera un script diferente, tienen direcciones diferentes. Es el efecto de la parametrización.
+    - [Slot 0](./parameterized_simulation_slot0.png)
+    - [Slot 20](./parameterized_simulation_slot20.png)
+
+# Ejercicio 1
+- Donación
+  - Dos beneficiarios, en vez de uno.
+  - La fecha límite se interpreta así.: El primer benficiario puede reciber la donación _HASTA LA FECHA LÍMITE_. El segundo beneficiario puede recibir la donación _DESPUES DE LA FECHA LÍMITE_.
+    - Si el primer beneficiario no recupera la donación en el tiempo establecido, es segundo puede reclamarla, es decir si el donado no recupera la donación se devuelve al donante.
+  - El ejercicio consiste en codificar la validación.
+
+- Entrada:
+  - Wallet 1 dona 50000 a Wallet 2 hasta el slot 20 (10)
+  - Wallet 2 dona 50000 a Wallet 1 hasta el slot 10 (5)
+  - Wallet 2 recupera la donación en slot 11.
+  - Wallet 1 no hace nada
+  - [Entrada](./homework1_input.png)
+- Salida:
+  - [Slot 11 tx0](./homework1_simulation_slot11_tx0.png)
+  - [Slot 11 tx1](/.homework1_simulation_slot11.tx1.png)
+
+  - El resultado final es que Wallet 2 recupera su donación a Wallet 1, ya que este no la ha recuperado, y recibe la donación de Wallet 1.
+
+  
+  - Mi solución es la siguiente:
+  ```haskell
+  mkValidator dat () ctx =
+  traceIfFalse "beneficiary1's signature missing" signedByBeneficiary1
+    && traceIfFalse "deadline1 not reached" deadline1Reached
+    || traceIfFalse "beneficiary2's signature missing" signedByBeneficiary2
+      && traceIfFalse "deadline2 not reached" deadline2Reached
+  where
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
+
+    signedByBeneficiary1 :: Bool
+    signedByBeneficiary1 = txSignedBy info $ beneficiary1 dat
+
+    signedByBeneficiary2 :: Bool
+    signedByBeneficiary2 = txSignedBy info $ beneficiary2 dat
+
+    deadline1Reached :: Bool
+    deadline1Reached = contains (to $ deadline dat) $ txInfoValidRange info
+
+    deadline2Reached :: Bool
+    deadline2Reached = contains (from $ deadline dat) $ txInfoValidRange info
+  ```
+  - La único reseñable es el uso de los intervalos para detectar si se ha alcanzado o no la fecha límite.
+    - Esta solución tiene un problema: los dos intervalos son cerrados por lo que, es posible que se cumplan las dos condiciones a la vez. ¿Cómo se define un intervalo abierto ?
+
+# Ejercicio 2
+- Donación parametrizada.
+  - Partimos de ejemplo parameterized.hs. En este ejercicio, la clave del beneficiario será un parámetro y el _Datum_ será la fecha límite.
+
+  - Mi solución
+  ```hast
