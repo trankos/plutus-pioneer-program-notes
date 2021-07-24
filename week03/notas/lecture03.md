@@ -555,4 +555,46 @@ scrAddress = scriptAddress . validator
   - Partimos de ejemplo parameterized.hs. En este ejercicio, la clave del beneficiario será un parámetro y el _Datum_ será la fecha límite.
 
   - Mi solución
-  ```hast
+  ```haskell
+  {-# INLINEABLE mkValidator #-}
+  mkValidator :: PubKeyHash -> POSIXTime -> () -> ScriptContext -> Bool
+  mkValidator p deadline () ctx =
+  traceIfFalse "beneficiary's signature missing" signedByBeneficiary
+    && traceIfFalse "deadline not reached" deadlineReached
+  where
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
+
+    signedByBeneficiary :: Bool
+    signedByBeneficiary = txSignedBy info p
+
+    deadlineReached :: Bool
+    deadlineReached = contains (from deadline) $ txInfoValidRange info
+
+  data Vesting
+
+  instance Scripts.ValidatorTypes Vesting where
+    type DatumType Vesting = POSIXTime
+    type RedeemerType Vesting = ()
+
+  typedValidator :: PubKeyHash -> Scripts.TypedValidator Vesting
+  typedValidator p =
+    Scripts.mkTypedValidator @Vesting
+      ($$(PlutusTx.compile [||mkValidator||]) `PlutusTx.applyCode` PlutusTx.liftCode p)
+      $$(PlutusTx.compile [||wrap||])
+    where
+      wrap = Scripts.wrapValidator @POSIXTime @()
+
+  validator :: PubKeyHash -> Validator
+  validator = Scripts.validatorScript . typedValidator
+
+  scrAddress :: PubKeyHash -> Ledger.Address
+  scrAddress = scriptAddress . validator
+  ```
+
+- A destacar:
+  - _mkvalidator_: La clave pública del beneficiario es un parámetro (p)
+  - _lift code: Sigue siendo necesario para incluir el parámetro en tiempo de compilación
+  - _Datum_: ahora contiene la fecha límite
+  - Lo cierto es que este cambio influyen más en los _endpoints_ (_give_ y _grab_) puesto que su lógica se simplifica un poco.
+
