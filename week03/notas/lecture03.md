@@ -1,5 +1,4 @@
-Clase 03 
-[Lecture03](https://www.youtube.com/watch?v=6_rfCCY9_gY)
+Clase 03 [Lecture03](https://www.youtube.com/watch?v=6_rfCCY9_gY)
 
 # Sobre el error ResponseTimeout
 
@@ -196,7 +195,7 @@ mkValidator dat () ctx = traceIfFalse "beneficiary's signature missing" signedBy
       deadlineReached :: Bool
       deadlineReached = contains (from $ deadline dat) $ txInfoValidRange info
       ```
-# Schema
+## Schema
 ```haskell
 data GiveParams = GiveParams
     { gpBeneficiary :: !PubKeyHash
@@ -306,9 +305,9 @@ grab = do
   ```
   > Todavía no acabo de entender la sintaxis de Haskell y como se crea una transacción. Las explicaciones de Lars dan por supuesto unos cuantos conceptos que no entiendo con claridad.
 
-  # Simulación
+# Simulación
 
-  ## Obtener la clave de un monedero
+## Obtener la clave de un monedero
 ```
 Prelude Week03.Homework1> :l src/Week03/Vesting.hs 
 Ok, one module loaded.
@@ -430,69 +429,69 @@ POSIXTime {getPOSIXTime = 1596059111000}
   - Con este cambio, introducir el tiempo en segundos, la simulación funciona correctamente.
 
 
-  ## Validaciones off-chain y on-chain
-  - En este ejemplo, la validación _off-chain_ (_grab_) que se ejecuta en el monedero, solo envía la transacción si esta es válida, es decir, si la fecha límite, _deadline_ se ha cumplido, y si es el beneficiario el que está generando la transacción, por tanto, con esta programación, el validador _on_chain_, siempre se cumple. Pero esto no tiene porqué ser así y alguien puede escribir otro código que no sea honesto.
+## Validaciones off-chain y on-chain
+- En este ejemplo, la validación _off-chain_ (_grab_) que se ejecuta en el monedero, solo envía la transacción si esta es válida, es decir, si la fecha límite, _deadline_ se ha cumplido, y si es el beneficiario el que está generando la transacción, por tanto, con esta programación, el validador _on_chain_, siempre se cumple. Pero esto no tiene porqué ser así y alguien puede escribir otro código que no sea honesto.
 
     > Hay que tener esto en cuenta siempre: las validaciones siempre _on_chain_.
 
     > Es el mismo escenario de una arquitectura cliente-servidor: el servidor siempre debe comprobar que los datos son correctos y no esperar que el cliente sea honesto.
 
 
-    # Parameterized: Contratos parametrizados
+# Parameterized: Contratos parametrizados
 
-    - Partiendo del ejemplo anterior, _vesting.hs_, vamos a realizar algunas modificaciones para que la información del beneficiario y la fecha límite se incluya en el contrato mediante un parámetro. Es una generalización.
-    
-    ```haskell
-    data VestingParam = VestingParam
-    { beneficiary :: PubKeyHash
-    , deadline    :: POSIXTime
-    } deriving Show
+- Partiendo del ejemplo anterior, _vesting.hs_, vamos a realizar algunas modificaciones para que la información del beneficiario y la fecha límite se incluya en el contrato mediante un parámetro. Es una generalización.
 
-    PlutusTx.makeLift ''VestingParam
+```haskell
+data VestingParam = VestingParam
+{ beneficiary :: PubKeyHash
+, deadline    :: POSIXTime
+} deriving Show
 
-    {-# INLINABLE mkValidator #-}
-    mkValidator :: VestingParam -> () -> () -> ScriptContext -> Bool
-    mkValidator p () () ctx = traceIfFalse "beneficiary's signature missing" signedByBeneficiary &&
-                              traceIfFalse "deadline not reached" deadlineReached
-      where
-        info :: TxInfo
-        info = scriptContextTxInfo ctx
+PlutusTx.makeLift ''VestingParam
 
-        signedByBeneficiary :: Bool
-        signedByBeneficiary = txSignedBy info $ beneficiary p
+{-# INLINABLE mkValidator #-}
+mkValidator :: VestingParam -> () -> () -> ScriptContext -> Bool
+mkValidator p () () ctx = traceIfFalse "beneficiary's signature missing" signedByBeneficiary &&
+                          traceIfFalse "deadline not reached" deadlineReached
+  where
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
 
-        deadlineReached :: Bool
-        deadlineReached = contains (from $ deadline p) $ txInfoValidRange info
+    signedByBeneficiary :: Bool
+    signedByBeneficiary = txSignedBy info $ beneficiary p
 
-    data Vesting
-    instance Scripts.ValidatorTypes Vesting where
-        type instance DatumType Vesting = ()
-        type instance RedeemerType Vesting = ()
+    deadlineReached :: Bool
+    deadlineReached = contains (from $ deadline p) $ txInfoValidRange info
 
-    typedValidator :: VestingParam -> Scripts.TypedValidator Vesting
-    typedValidator p = Scripts.mkTypedValidator @Vesting
-        ($$(PlutusTx.compile [|| mkValidator ||]) `PlutusTx.applyCode` PlutusTx.liftCode p)
-        $$(PlutusTx.compile [|| wrap ||])
-      where
-        wrap = Scripts.wrapValidator @() @()
+data Vesting
+instance Scripts.ValidatorTypes Vesting where
+    type instance DatumType Vesting = ()
+    type instance RedeemerType Vesting = ()
 
-    validator :: VestingParam -> Validator
-    validator = Scripts.validatorScript . typedValidator
+typedValidator :: VestingParam -> Scripts.TypedValidator Vesting
+typedValidator p = Scripts.mkTypedValidator @Vesting
+    ($$(PlutusTx.compile [|| mkValidator ||]) `PlutusTx.applyCode` PlutusTx.liftCode p)
+    $$(PlutusTx.compile [|| wrap ||])
+  where
+    wrap = Scripts.wrapValidator @() @()
 
-    valHash :: VestingParam -> Ledger.ValidatorHash
-    valHash = Scripts.validatorHash . typedValidator
+validator :: VestingParam -> Validator
+validator = Scripts.validatorScript . typedValidator
 
-    scrAddress :: VestingParam -> Ledger.Address
-    scrAddress = scriptAddress . validator
-    ```
+valHash :: VestingParam -> Ledger.ValidatorHash
+valHash = Scripts.validatorHash . typedValidator
 
-  - Primero definimos la estructura de información de los parámetros y modificamos la firma del validador.
-      - _Datum_ ya no es necesario -> ()
-      - _Redeemer_, igual que antes -> ()
-      - _ScriptContex_, igual que antes.
-      - Aparece un nuevo parámetro _VestingParam_, que sustituye al _Datum_ de la versión _vesting.hs_
+scrAddress :: VestingParam -> Ledger.Address
+scrAddress = scriptAddress . validator
+```
 
-  - Explicación de como compilar el validador en Plutus: _lift code_: Permite compilar en Plutus instancias de datos. Es un tema complejo, mejor acudir al video: 1:03:00.
+- Primero definimos la estructura de información de los parámetros y modificamos la firma del validador.
+  - _Datum_ ya no es necesario -> ()
+  - _Redeemer_, igual que antes -> ()
+  - _ScriptContex_, igual que antes.
+  - Aparece un nuevo parámetro _VestingParam_, que sustituye al _Datum_ de la versión _vesting.hs_
+
+- Explicación de como compilar el validador en Plutus: _lift code_: Permite compilar en Plutus instancias de datos. Es un tema complejo, mejor acudir al video: 1:03:00.
 
 
 ## Simulación
