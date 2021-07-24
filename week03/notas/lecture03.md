@@ -593,8 +593,8 @@ scrAddress = scriptAddress . validator
   ```
 
 - A destacar:
-  - _mkvalidator_: La clave pública del beneficiario es un parámetro (p)
-  - _lift code: Sigue siendo necesario para incluir el parámetro en tiempo de compilación
-  - _Datum_: ahora contiene la fecha límite
+  - _mkvalidator_: La clave pública del beneficiario es un parámetro (p) y no se extrae. Se compara directamente con la de la transacción.
+  - _lift code_: Sigue siendo necesario para incluir el parámetro de la clave pública del beneficiario en tiempo de compilación.
+  - _Datum_: ahora contiene la fecha límite-
   - Lo cierto es que este cambio influyen más en los _endpoints_ (_give_ y _grab_) puesto que su lógica se simplifica un poco.
 
