@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../plutus-pioneer-program"
+		}
+	],
+	"settings": {}
+}

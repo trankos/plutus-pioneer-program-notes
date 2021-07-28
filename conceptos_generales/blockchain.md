@@ -30,6 +30,7 @@
 - [Aquí empezó todo](https://nakamotoinstitute.org/bitcoin/).
 - [Aquí empezó todo (en españo)](https://nakamotoinstitute.org/static/docs/bitcoin-es.pdf).
 - Un copia local en PDF, en [inglés](../docs/bitcoin.pdf) y en [español](../docs/bitcoin-es.pdf)
+- Otra vez, Mr Lars Brünjes en acción. [Introducción a las criptomonedas](https://www.youtube.com/watch?v=EoO76YCSTLo&list=PLJ3w5xyG4JWmBVIigNBytJhvSSfZZzfTm&index=1)
 
 
 
