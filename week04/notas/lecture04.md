@@ -350,3 +350,125 @@ Wallet 10:
 - Codificar las trazas de ejecución
 - Capturar la excepción si no hay fondos.
 
+## Trazas de ejecución
+- [Código](../code/Solution1.hs)
+- Salida: payTest1
+```
+payTest1
+Slot 00000: TxnValidate 0636250aef275497b4f3807d661a299e34e53e5ad3bc1110e43d1f3420bc8fae
+Slot 00000: SlotAdd Slot 1
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'pay' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "pay")]),Object (fromList [("unEndpointValue",Object (fromList [("ppLovelace",Number 1000000.0),("ppRecipient",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: W1: TxSubmit: 66b88e2673c2d50a5de7603fb28c71ac56963d88dda4c69dc529e2d26638b294
+Slot 00001: TxnValidate 66b88e2673c2d50a5de7603fb28c71ac56963d88dda4c69dc529e2d26638b294
+Slot 00001: SlotAdd Slot 2
+Slot 00002: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'pay' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "pay")]),Object (fromList [("unEndpointValue",Object (fromList [("ppLovelace",Number 2000000.0),("ppRecipient",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00002: W1: TxSubmit: 6f75584c2cef83f2758a4b44dd7336c4cc61a41077f9433dc347d649b94410d4
+Slot 00002: TxnValidate 6f75584c2cef83f2758a4b44dd7336c4cc61a41077f9433dc347d649b94410d4
+Slot 00002: SlotAdd Slot 3
+Slot 00003: SlotAdd Slot 4
+Final balances
+Wallet 1: 
+    {, ""}: 96999980
+Wallet 2: 
+    {, ""}: 103000000
+Wallet 3: 
+    {, ""}: 100000000
+Wallet 4: 
+    {, ""}: 100000000
+Wallet 5: 
+    {, ""}: 100000000
+Wallet 6: 
+    {, ""}: 100000000
+Wallet 7: 
+    {, ""}: 100000000
+Wallet 8: 
+    {, ""}: 100000000
+Wallet 9: 
+    {, ""}: 100000000
+Wallet 10: 
+    {, ""}: 100000000
+```
+- Salida: payTest2
+```
+payTest2
+Slot 00000: TxnValidate 0636250aef275497b4f3807d661a299e34e53e5ad3bc1110e43d1f3420bc8fae
+Slot 00000: SlotAdd Slot 1
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'pay' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "pay")]),Object (fromList [("unEndpointValue",Object (fromList [("ppLovelace",Number 1.0e9),("ppRecipient",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: *** CONTRACT STOPPED WITH ERROR: "\"WalletError (InsufficientFunds \\\"Total: Value (Map [(,Map [(\\\\\\\"\\\\\\\",100000000)])]) expected: Value (Map [(,Map [(\\\\\\\"\\\\\\\",1000000000)])])\\\")\""
+Slot 00001: SlotAdd Slot 2
+Slot 00002: SlotAdd Slot 3
+Slot 00003: SlotAdd Slot 4
+Final balances
+Wallet 1: 
+    {, ""}: 100000000
+Wallet 2: 
+    {, ""}: 100000000
+Wallet 3: 
+    {, ""}: 100000000
+Wallet 4: 
+    {, ""}: 100000000
+Wallet 5: 
+    {, ""}: 100000000
+Wallet 6: 
+    {, ""}: 100000000
+Wallet 7: 
+    {, ""}: 100000000
+Wallet 8: 
+    {, ""}: 100000000
+Wallet 9: 
+    {, ""}: 100000000
+Wallet 10: 
+    {, ""}: 100000000
+
+```
+
+## Trazas con captura de la excepción
+- [Código](../code/Solution2.hs)
+
+- Salida payTest2
+```
+payTest2
+Slot 00000: TxnValidate 0636250aef275497b4f3807d661a299e34e53e5ad3bc1110e43d1f3420bc8fae
+Slot 00000: SlotAdd Slot 1
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'pay' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "pay")]),Object (fromList [("unEndpointValue",Object (fromList [("ppLovelace",Number 1.0e9),("ppRecipient",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: *** CONTRACT LOG: "Exception: WalletError (InsufficientFunds \"Total: Value (Map [(,Map [(\\\"\\\",100000000)])]) expected: Value (Map [(,Map [(\\\"\\\",1000000000)])])\")"
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance stopped (no errors)
+Slot 00001: SlotAdd Slot 2
+Slot 00002: SlotAdd Slot 3
+Slot 00003: SlotAdd Slot 4
+Final balances
+Wallet 1: 
+    {, ""}: 100000000
+Wallet 2: 
+    {, ""}: 100000000
+Wallet 3: 
+    {, ""}: 100000000
+Wallet 4: 
+    {, ""}: 100000000
+Wallet 5: 
+    {, ""}: 100000000
+Wallet 6: 
+    {, ""}: 100000000
+Wallet 7: 
+    {, ""}: 100000000
+Wallet 8: 
+    {, ""}: 100000000
+Wallet 9: 
+    {, ""}: 100000000
+Wallet 10: 
+    {, ""}: 100000000
+
+```
+- La captura de la excepción digamos que es un tanto sutil, por lo menos en lo que respecta a las trazas.
+    - El manejador de excepciones funciona. la traza asociada se emite, pero no tengo claro si el contrato se para o no. Voy a introducir una traza en el contrato.
