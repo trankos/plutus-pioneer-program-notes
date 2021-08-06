@@ -108,13 +108,13 @@ mkOracleValidator oracle x r ctx =
         Use    -> traceIfFalse "oracle value changed"       (outputDatum == Just x)              &&
                   traceIfFalse "fees not paid"              feesPaid
 ```
-    - Hay que comprobar:
-        - El NFT de la UTXo de entrada (la que se va a consumir)
-        - El NFT de la UTXo de salida (la que se va a generar)
-        - Si _update_:
-            - Las firmas deben coincider: UTXo y dueño del oráculo (solo el dueño puede cambiar un valor)
-            - El valor de la cotización debe ser del tipo correcto ¿?
-        - Si _use_: 
-            - La cotización utilizada debe ser la del oráculo.
-            - La comisión de uso debe haberse pagado.
+- Hay que comprobar:
+    - El NFT de la UTXo de entrada (la que se va a consumir)
+    - El NFT de la UTXo de salida (la que se va a generar)
+    - Si _update_:
+        - Las firmas deben coincider: UTXo y dueño del oráculo (solo el dueño puede cambiar un valor)
+        - El valor de la cotización debe ser del tipo correcto ¿?
+    - Si _use_: 
+        - La cotización utilizada debe ser la del oráculo.
+        - La comisión de uso debe haberse pagado.
         
