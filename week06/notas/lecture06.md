@@ -94,7 +94,7 @@ oracleValue o f = do
 - _oracleValue_: Es el valor del dato que ofrece el oráculo, la cotización (será un entero para simplificar)
     - Esta función es una Mónada.
 
-### Validación 
+### Validación (_on chain_)
 - Este código valida la UTXo del oráculo. Es el núcleo de nuestro proceso.
 - Validación de la UTxo del oráculo según la operación a realizar (_update_, _use_).
 ```haskell
@@ -112,9 +112,17 @@ mkOracleValidator oracle x r ctx =
     - El NFT de la UTXo de entrada (la que se va a consumir)
     - El NFT de la UTXo de salida (la que se va a generar)
     - Si _update_:
-        - Las firmas deben coincider: UTXo y dueño del oráculo (solo el dueño puede cambiar un valor)
-        - El valor de la cotización debe ser del tipo correcto ¿?
+        - Las firmas deben coincidir: UTXo y dueño del oráculo (solo el dueño puede cambiar un valor).
+        - El valor de la cotización debe ser del tipo correcto.
     - Si _use_: 
-        - La cotización utilizada debe ser la del oráculo.
+        - La cotización utilizada (para realizar el _swap_) debe ser la del oráculo.
         - La comisión de uso debe haberse pagado.
         
+### Oráculo (_off chain_)
+- _startOracle_: Crea un oráculo: NFT, clave, comisiones, activo (USD)
+    - Lo más interesante es la creación del NFT, que necesita un contrato con un script de minado:
+    ```haskell
+    osc <- mapError (pack . show) (mintContract pkh [(oracleTokenName, 1)] :: Contract w s CurrencyError OneShotCurrency)
+    ```
+- _updateOracle_: Cambia el valor de una cotización
+
