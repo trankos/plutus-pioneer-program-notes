@@ -1,477 +1,568 @@
-Clase 06
-- [Video](https://www.youtube.com/watch?v=24SHPHEc3zo)
-- [Notas](https://docs.plutus-community.com/docs/lectures/Lecture6.html)
+Clase 07
+- [Video](https://www.youtube.com/watch?v=uwZ903Zd0DU)
+- [Notas](https://docs.plutus-community.com/docs/lectures/Lecture7.html)
 
-# Introducción
-- Vamos a analizar un caso de estudio que comprenda el uso de _oracles_ (_oráculos_). Un _oracle_ (_oráculo_) es una fuente de datos de confianza que puede utilizarse como entrada para realizar transacciones.
+# Máquinas de estados (state Machines)
+- También conocidos como máquinas de estado finitas o autómatas. Es un concepto matemático, algebraico, que permite código más compacto. Una máquina de estados se define mediante: 
+> [Wikipedia](https://es.wikipedia.org/wiki/Aut%C3%B3mata_finito) Un autómata finito o máquina de estado finito es un modelo computacional que realiza cómputos en forma automática sobre una entrada para producir una salida. Este modelo está conformado por un alfabeto, un conjunto de estados finito, una función de transición, un estado inicial y un conjunto de estados finales.
+# Ejemplo
+- Juego con dos jugadores con una mecánica similar a _piedra, papel, tijera_ pero con 0 y 1 (solo dos opciones):
+    - Los dos jugadores eligen una opción _al mismo tiempo_.
+    - Si los dos eligen el mismo valor, gana Alice. Si eligen valores diferentes, gana Bob.
 
-# Oracle 
-- Para poder utilizar una fuente de información externa en una transacción en la _Blockchain_, la aproximación más sencilla es que esta información sea un UTXo. Hay otras formas más sofisticadas, pero para el propósito que nos ocupa, es suficiente.
-- Por tanto, los datos que genera el _oracle_ se encapsulan en una UTXo que tienen como _dirección_ el _oracle_. El _Datum_ de la UTXo contrendrá la información.
-    - En este caso, se trata de información en tiempo real de la cotización de ADA/USD.
-- Primer problema: Un validación en un script _on chain_, solo se ejecuta cuando se _consume_ dicho UTXo. No se puede impedir la generación de UTXo arbitrarias desde el _oracle_.
-- Para identificar de forma única esta UTXo, se utiliza un NFT, que se sabemos que es único. O sea, tenemos una UTXo tal que:
-    - Proviene de un _oráculo_ determinado
-    - Es única: Tiene un NFT asociada
-    - Contiene un dato de confianza, el que sea (esto nos lo creeemos por el momento)
+|       	|   	| Bob   	| Bob   	|   	|
+|-------	|---	|-------	|-------	|---	|
+|       	|   	| 0     	| 1     	|   	|
+| Alice 	| 0 	| Alice 	| Bob   	|   	|
+| Alice 	| 1 	| Bob   	| Alice 	|   	|
 
-- En general, un _oráculo_ no sabe como van a utilizarse sus datos (entiendo que los ofrecerá en un formato dado, definido como  una API)
+- La idea es que los jugadores puedan jugar a distancia de manera justa. Para ello vamos a utilizar _hash_:
+    - Alica envía a Bob su elección: primero la _hash_ de su elección y luego la elección en claro. De esta forma Bob puede comprobar si su primera elección es la correcta.
+    - El problema es que solo hay dos opciones, o sea, que a través de la hash se puede conocer la elección.
+    - Para ello vamos introducir un valor aleatoria (_nonce_) que se concatena a la elección. Ahora lo que se envía es _hash(nonce || 0)_.
+    - Esta opción es la vamos a codificar.
 
-# Contrato
-- Para nuestro caso, el contrato que es un servicio de _Swap_, donde de puede cambiar ADA por USD, a la cotización ofreciada por el _oráculo_.
-- En la _blockchain_ no se puede realizar este cambio por lo que asumimos que utilizamo un NFT que representa a la moneda USD.
-
-# Recompensa o incentivo
-- Es necesario incentivar al _oráculo_ para que proporcione la información por lo que se fija un comisión por su uso en una trasacción, por ejemplo, 1 ADA.
-
-# Transacción
-- El proceso de la transacción se corresponde con el siguiente diagrama
-![](./swap_transaction.png)
-
-- Entradas (UTXo):
-    - **Oracle**: Cotización de ADA/USD (NFT 1.75)
-        - **use**:
-    - **Swap**: Nº de ADA que se desean intercambiar (100 ADA)
-    - **Buyer**: Comprador de los ADA a la cotización proporcionada por el oráculo y comisión ( 175 USD + 1 ADA)
-- Salidas (UTXo)
-    - **Oracle**: El NFT, que no varía, y su la comisión a pagar (NTF 1.75 + 1 ADA
-    - **Seller**: Recibe los USD (175 USD)
-    - **Buyer**: Recibe los ADA.
+- La máquina de estados sería algo similar a esto: ![](./game_state_machine.png)
+    1. Alice envía su jugada (_hash (nonce|| 0 o 1))
+    2. Bob la recibe y hace su jugada (0 o 1). Esta jugada es pública.
+    3. Como Alice sabe su jugada puede comprobar si ha ganado. Si ha ganado revela su jugada.
+    4. Para que Bob comprueba si Alice dice la verdad debe generar la _hash_ de nuevo.
+        - Para ello Alice, cuando revela su jugada, debe enviar el _nonce_, para que Bob pueda recrear la hash y cotejarla con la que envió Alice en primer lugar. La jugada es la misma que la de Bob. 
+    5. Si las _hash_ coinciden, Alice gana.
 
 
-# Actualización del valor de los datos de un Oráculo y recolección de comisiones.
-- Esto es un tanto extraño. Esta claro que los datos que proporciona el oráculo pueden cambiar con el tiempo y que, además el dueño del oráculo debe ser capaz de cobrar las comisiones por su uso.
-- En este caso de uso se ha añadido una operación que:
-    - Permite cambiar el valor de la cotización
-    - Permite recoger las comisiones asociadas al uso de este dato, si las tiene.
+# Implementación sin máquina de estados: EventOdd
+- La implementación está en el fichero [EventOdd.hs](../code/EvenOdd.hs). Es un contrato que implementará el juego según la máquina de estados definida.
 
-![](./oracle_fee_transaction.png)
-
-- La trasacción _update_ la realiza el _oráculo_
-    - Para propocionar un valor nuevo
-    - Para cobrar las comisiones.
-
-# Implementación
-- Vamos a analizar el código que implementa las operaciones que hemos descrito anteriormente.
-## Oráculo: Core.hs
+## Game
 
 ```haskell
-data Oracle = Oracle
-    { oSymbol   :: !CurrencySymbol
-    , oOperator :: !PubKeyHash
-    , oFee      :: !Integer
-    , oAsset    :: !AssetClass
+data Game = Game
+    { gFirst          :: !PubKeyHash
+    , gSecond         :: !PubKeyHash
+    , gStake          :: !Integer
+    , gPlayDeadline   :: !POSIXTime
+    , gRevealDeadline :: !POSIXTime
+    , gToken          :: !AssetClass
     } deriving (Show, Generic, FromJSON, ToJSON, Prelude.Eq, Prelude.Ord)
+```
+- _Game_: es el tipo de dato con los parámetros del contrato.
+- _gFirst_, _gSecond_: Claves de los jugadores.
+- _gStake_: Apuesta.
+- _gPlayDeadline_: Fecha tope para el que el segundo jugador haga su movimiento.
+    - Si no lo hace, el primer jugador recibe su apuesta.
+- _gRevealDeadline_: Fecha tope para el que primer jugador revele su juego. 
+    - Si lo hace y gana, recibe la apuesta (la de ambos). 
+    - Si lo hace y pierde, el segundo jugador recibe la apuesta (la de ambos)
+    - Si no lo hace, cuando vence esta fecha, el segundo jugador recibe la apuesta (la de ambos)
+- _gToken_: Es un NFT, con el mismo uso en un _óraculo_: permitirá identificar la UTXo adecuada, es decir, una partida.
 
-data OracleRedeemer = Update | Use
+## GameChoice
+```haskell
+data GameChoice = Zero | One
+    deriving (Show, Generic, FromJSON, ToJSON, ToSchema, Prelude.Eq, Prelude.Ord)
+
+instance Eq GameChoice where
+    {-# INLINABLE (==) #-}
+    Zero == Zero = True
+    One  == One  = True
+    _    == _    = False
+```
+- Dos opciones (0,1). Hay que definir el operador de comparación (_Eq_)
+
+## Datum: GameDatum
+```haskell
+data GameDatum = GameDatum ByteString (Maybe GameChoice)
     deriving Show
+instance Eq GameDatum where
+    {-# INLINABLE (==) #-}
+    GameDatum bs mc == GameDatum bs' mc' = (bs == bs') && (mc == mc')
+```
+- El dato de entrada, la jugada, es un _hash_ (_ByteString). 
+- Hay dos, la primera es obligatoria, la segunda  es de tipo (_Maybe_), puesto que la primera vez no hay segunda jugada.
+- También se define un operador de igualdad, para este tipo de dato.
 
-{-# INLINABLE oracleTokenName #-}
-oracleTokenName :: TokenName
-oracleTokenName = TokenName emptyByteString
+## Redeemer: GameRedeemer
+```haskell
+data GameRedeemer = Play GameChoice | Reveal ByteString | ClaimFirst | ClaimSecond
+    deriving Show
+```
+- Este tipo de dato se corresponde con las transiciones de la máquina de estados que define el juego.
+    -  _Play_: el segundo jugador hace su jugada: argumento: (Zero|One)
+    - _Reveal_: el primer jugador revela su jugada, si ha ganado: argumento: _nonce_. La jugada no tienen porqué enviarse ()
+    - _ClaimFirst_: el primer jugador reclama su apuesta ya que el segundo no ha realizado su jugada.
+    - _ClaimSecond_: el segundo jugador reclama su apuesta ya que el primero no ha revelado su jugada (ha perdido)
 
-{-# INLINABLE oracleAsset #-}
-oracleAsset :: Oracle -> AssetClass
-oracleAsset oracle = AssetClass (oSymbol oracle, oracleTokenName)
+## Funciones auxiliares
+```haskell
+{-# INLINABLE lovelaces #-}
+lovelaces :: Value -> Integer
+lovelaces = Ada.getLovelace . Ada.fromValue
 
-{-# INLINABLE oracleValue #-}
-oracleValue :: TxOut -> (DatumHash -> Maybe Datum) -> Maybe Integer
-oracleValue o f = do
+{-# INLINABLE gameDatum #-}
+gameDatum :: TxOut -> (DatumHash -> Maybe Datum) -> Maybe GameDatum
+gameDatum o f = do
     dh      <- txOutDatum o
     Datum d <- f dh
     PlutusTx.fromBuiltinData d
 ```
+- _lovelaces_ : Para obtener un valor en _lovelaces_
+- _gameDatum_ : Para extraer el _Datum_ de una UTXo.
 
-- _oSymbol_: Símbolo del NFT que vamos a utilizar. _TokenName_ estará vacío.
-- _oOperator_: _Hash_ de la clave pública del dueño del oráculo.
-- _oFee_ : La comisión asociada al uso del dato.
-- _oAsset_ : Activo por el que se va a intercambiar los ADA. En el ejemplo, USD, como este no existe
-- _Redeemer_ : Dos operaciones sobre este UTXo: 
-    - _update_: Para cambiar el valor del dato proporcionado y recolectar las comisiones
-    - _use_ : Para usar el valor en una transacciónde _swap_.
-
-- _oracleAsset_: Es el NFT que utilizamos en este oráculo. El nombre del token será la cadena vacía.
-- _oracleValue_: Es el valor del dato que ofrece el oráculo, la cotización (será un entero para simplificar)
-    - Esta función es una Mónada.
-
-### Validación (_on chain_)
-- Este código valida la UTXo del oráculo. Es el núcleo de nuestro proceso.
-- Validación de la UTxo del oráculo según la operación a realizar (_update_, _use_).
+## Validador
 ```haskell
-mkOracleValidator :: Oracle -> Integer -> OracleRedeemer -> ScriptContext -> Bool
-mkOracleValidator oracle x r ctx =
-    traceIfFalse "token missing from input"  inputHasToken  &&
-    traceIfFalse "token missing from output" outputHasToken &&
-    case r of
-        Update -> traceIfFalse "operator signature missing" (txSignedBy info $ oOperator oracle) &&
-                  traceIfFalse "invalid output datum"       validOutputDatum
-        Use    -> traceIfFalse "oracle value changed"       (outputDatum == Just x)              &&
-                  traceIfFalse "fees not paid"              feesPaid
+mkGameValidator :: Game -> ByteString -> ByteString -> GameDatum -> GameRedeemer -> ScriptContext -> Bool
+mkGameValidator game bsZero' bsOne' dat red ctx =
+    traceIfFalse "token missing from input" (assetClassValueOf (txOutValue ownInput) (gToken game) == 1) &&
+    case (dat, red) of
+        (GameDatum bs Nothing, Play c) ->
+            traceIfFalse "not signed by second player"   (txSignedBy info (gSecond game))                                   &&
+            traceIfFalse "first player's stake missing"  (lovelaces (txOutValue ownInput) == gStake game)                   &&
+            traceIfFalse "second player's stake missing" (lovelaces (txOutValue ownOutput) == (2 * gStake game))            &&
+            traceIfFalse "wrong output datum"            (outputDatum == GameDatum bs (Just c))                             &&
+            traceIfFalse "missed deadline"               (to (gPlayDeadline game) `contains` txInfoValidRange info)         &&
+            traceIfFalse "token missing from output"     (assetClassValueOf (txOutValue ownOutput) (gToken game) == 1)
+
+        (GameDatum bs (Just c), Reveal nonce) ->
+            traceIfFalse "not signed by first player"    (txSignedBy info (gFirst game))                                    &&
+            traceIfFalse "commit mismatch"               (checkNonce bs nonce c)                                            &&
+            traceIfFalse "missed deadline"               (to (gRevealDeadline game) `contains` txInfoValidRange info)       &&
+            traceIfFalse "wrong stake"                   (lovelaces (txOutValue ownInput) == (2 * gStake game))             &&
+            traceIfFalse "NFT must go to first player"   nftToFirst
+
+        (GameDatum _ Nothing, ClaimFirst) ->
+            traceIfFalse "not signed by first player"    (txSignedBy info (gFirst game))                                    &&
+            traceIfFalse "too early"                     (from (1 + gPlayDeadline game) `contains` txInfoValidRange info)   &&
+            traceIfFalse "first player's stake missing"  (lovelaces (txOutValue ownInput) == gStake game)                   &&
+            traceIfFalse "NFT must go to first player"   nftToFirst
+
+        (GameDatum _ (Just _), ClaimSecond) ->
+            traceIfFalse "not signed by second player"   (txSignedBy info (gSecond game))                                   &&
+            traceIfFalse "too early"                     (from (1 + gRevealDeadline game) `contains` txInfoValidRange info) &&
+            traceIfFalse "wrong stake"                   (lovelaces (txOutValue ownInput) == (2 * gStake game))             &&
+            traceIfFalse "NFT must go to first player"   nftToFirst
+
+        _                              -> False
+  where
+    info :: TxInfo
+    info = scriptContextTxInfo ctx
+
+    ownInput :: TxOut
+    ownInput = case findOwnInput ctx of
+        Nothing -> traceError "game input missing"
+        Just i  -> txInInfoResolved i
+
+    ownOutput :: TxOut
+    ownOutput = case getContinuingOutputs ctx of
+        [o] -> o
+        _   -> traceError "expected exactly one game output"
+
+    outputDatum :: GameDatum
+    outputDatum = case gameDatum ownOutput (`findDatum` info) of
+        Nothing -> traceError "game output datum not found"
+        Just d  -> d
+
+    checkNonce :: ByteString -> ByteString -> GameChoice -> Bool
+    checkNonce bs nonce cSecond = sha2_256 (nonce `concatenate` cFirst) == bs
+      where
+        cFirst :: ByteString
+        cFirst = case cSecond of
+            Zero -> bsZero'
+            One  -> bsOne'
+
+    nftToFirst :: Bool
+    nftToFirst = assetClassValueOf (valuePaidTo info $ gFirst game) (gToken game) == 1
 ```
-- Hay que comprobar:
-    - El NFT de la UTXo de entrada (la que se va a consumir)
-    - El NFT de la UTXo de salida (la que se va a generar)
-    - Si _update_:
-        - Las firmas deben coincidir: UTXo y dueño del oráculo (solo el dueño puede cambiar un valor).
-        - El valor de la cotización debe ser del tipo correcto.
-    - Si _use_: 
-        - La cotización utilizada (para realizar el _swap_) debe ser la del oráculo.
-        - La comisión de uso debe haberse pagado.
-        
-### Oráculo (_off chain_)
-- _startOracle_: Crea un oráculo: NFT, clave, comisiones, activo (USD)
-    - Lo más interesante es la creación del NFT, que necesita un contrato con un script de minado:
-    ```haskell
-    startOracle :: forall w s. OracleParams -> Contract w s Text Oracle
-    startOracle op = do
+- El validador se define como:
+> mkGameValidator :: Game -> ByteString -> ByteString -> GameDatum -> GameRedeemer -> ScriptContext -> Bool
+  Donde:
+  - _Game_: Parámetros del contrato.
+  - _ByteString_, _Bytestring_: Son los valores cero y uno pero como _bytestring_ . No se pueden pasar como literales por algún extraño y haskelliano motivo relacionado con el paso a Plutus (el código debe compilarse previamente como código Plutus)
+  - _GameDatum_ , _GameRedeemer_,  _ScriptContext_: _as usual_
+
+  - Vamos a analizar las funciones auxialiares
+    - _info_: Info de _Scriptcontex_
+    - _ownInput_: Solo puede haber una y debe haber una.
+    - _ownOutput_: Idem, solo puede haber una. 
+    - _outputDatum_: Son los datos de la jugada.
+    - _checkNonce_: Para cotejar la jugada del primer jugador si este ha ganado (o dice que ha ganado: _Reveal_)
+    - _nftToFirst_: Termine como termine el juego el NFT debe volver al primer jugador, no se gasta nunca pero sí se actualiza cada vez que se juega.
+  - La lógica es la siguiente:
+    1. La entrada que se valida debe estar identificada por el _token de estado_ (supongo que se refiere al NFT)
+    2. Las posibles combinaciones de entradas se seleccionan en un una sentencia _case_:
+        - El primer jugador ha movido y el segundo realiza su jugada (_Play c_)
+        > (GameDatum bs Nothing, Play c) ->
+        - Los dos jugadores ha realizado su jugada y el primer jugador revela su jugada, porque (_dice que_)ha ganado:
+        > (GameDatum bs (Just c), Reveal nonce) ->
+        - El primer jugador reclama el premio.
+        >  (GameDatum _ Nothing, ClaimFirst) ->
+        - El segundo jugador reclama el premio.
+        > (GameDatum _ (Just _), ClaimSecond) ->
+    3. No hay posibilidades. El resto de combinaciones fallará y no validará la transacción.
+
+
+# Ha jugar
+    - Dos funciones: _firstGame_ y _secondGame_
+
+## firstGame
+```haskell
+firstGame :: forall w s. FirstParams -> Contract w s Text ()
+firstGame fp = do
+pkh <- pubKeyHash <$> Contract.ownPubKey
+let game = Game
+        { gFirst          = pkh
+        , gSecond         = fpSecond fp
+        , gStake          = fpStake fp
+        , gPlayDeadline   = fpPlayDeadline fp
+        , gRevealDeadline = fpRevealDeadline fp
+        , gToken          = AssetClass (fpCurrency fp, fpTokenName fp)
+        }
+    v    = lovelaceValueOf (fpStake fp) <> assetClassValue (gToken game) 1
+    c    = fpChoice fp
+    bs   = sha2_256 $ fpNonce fp `concatenate` if c == Zero then bsZero else bsOne
+    tx   = Constraints.mustPayToTheScript (GameDatum bs Nothing) v
+ledgerTx <- submitTxConstraints (typedGameValidator game) tx
+void $ awaitTxConfirmed $ txId ledgerTx
+logInfo @String $ "made first move: " ++ show (fpChoice fp)
+
+waitUntilTimeHasPassed $ fpPlayDeadline fp
+
+m   <- findGameOutput game
+now <- currentTime
+case m of
+    Nothing             -> throwError "game output not found"
+    Just (oref, o, dat) -> case dat of
+        GameDatum _ Nothing -> do
+            logInfo @String "second player did not play"
+            let lookups = Constraints.unspentOutputs (Map.singleton oref o) <>
+                            Constraints.otherScript (gameValidator game)
+                tx'     = Constraints.mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData ClaimFirst) <>
+                            Constraints.mustValidateIn (from now)
+            ledgerTx' <- submitTxConstraintsWith @Gaming lookups tx'
+            void $ awaitTxConfirmed $ txId ledgerTx'
+            logInfo @String "reclaimed stake"
+
+        GameDatum _ (Just c') | c' == c -> do
+
+            logInfo @String "second player played and lost"
+            let lookups = Constraints.unspentOutputs (Map.singleton oref o) <>
+                            Constraints.otherScript (gameValidator game)
+                tx'     = Constraints.mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData $ Reveal $ fpNonce fp) <>
+                            Constraints.mustValidateIn (to $ now + 1000)
+            ledgerTx' <- submitTxConstraintsWith @Gaming lookups tx'
+            void $ awaitTxConfirmed $ txId ledgerTx'
+            logInfo @String "victory"
+
+        _ -> logInfo @String "second player played and won"
+```
+
+## SecondGame
+```haskell
+data SecondParams = SecondParams
+    { spFirst          :: !PubKeyHash
+    , spStake          :: !Integer
+    , spPlayDeadline   :: !POSIXTime
+    , spRevealDeadline :: !POSIXTime
+    , spCurrency       :: !CurrencySymbol
+    , spTokenName      :: !TokenName
+    , spChoice         :: !GameChoice
+    } deriving (Show, Generic, FromJSON, ToJSON, ToSchema)
+
+secondGame :: forall w s. SecondParams -> Contract w s Text ()
+secondGame sp = do
     pkh <- pubKeyHash <$> Contract.ownPubKey
-    osc <- mapError (pack . show) (mintContract pkh [(oracleTokenName, 1)] :: Contract w s CurrencyError OneShotCurrency)
-    let cs     = Currency.currencySymbol osc
-        oracle = Oracle
-            { oSymbol   = cs
-            , oOperator = pkh
-            , oFee      = opFees op
-            , oAsset    = AssetClass (opSymbol op, opToken op)
+    let game = Game
+            { gFirst          = spFirst sp
+            , gSecond         = pkh
+            , gStake          = spStake sp
+            , gPlayDeadline   = spPlayDeadline sp
+            , gRevealDeadline = spRevealDeadline sp
+            , gToken          = AssetClass (spCurrency sp, spTokenName sp)
             }
-    logInfo @String $ "started oracle " ++ show oracle
-    return oracle
-    ```
-    - La creación del NFT debe realizarse antes de emitir el dato puesto que puede ser, es, lenta (un par de _slots_). Como van en parejas (NFT, dato) hay que acuñar el NFT antes.
-    - _mintContract_ es una función definida en un paquete que es una implementación más genérica de NFT. 
-    ```
-    >:t mintContract
-    mintContract
-    :: AsCurrencyError e =>
-        PubKeyHash
-        -> [(TokenName, Integer)] -> Contract w s e OneShotCurrency
-       	-- Defined in ‘Plutus.Contracts.Currency’
-
-    Prelude Plutus.Contract Plutus.Contracts.Currency Ledger Week06.Oracle.Core> :t mapError
-    mapError :: (e -> e') -> Contract w s e a -> Contract w s e' a
-    Prelude Plutus.Contract Plutus.Contracts.Currency Ledger Week06.Oracle.Core> :i CurrencyError
-    type CurrencyError :: *
-    newtype CurrencyError = CurContractError ContractError
-        -- Defined in ‘Plutus.Contracts.Currency’
-    instance Eq CurrencyError -- Defined in ‘Plutus.Contracts.Currency’
-    instance Show CurrencyError
-    -- Defined in ‘Plutus.Contracts.Currency’
-    instance AsContractError CurrencyError
-    -- Defined in ‘Plutus.Contracts.Currency’
-    instance AsCurrencyError CurrencyError
-    -- Defined in ‘Plutus.Contracts.Currency’
-
-    ```
-    - Esta función tiene una particularidad, el tipo de error (_AsCurrencyError_): 
-
-- _updateOracle_: Cambia el valor de una cotización.
-- _findOracle_: Busca la cotización que queremos actualizar.
-
-```haskell
-updateOracle :: forall w s. Oracle -> Integer -> Contract w s Text ()
-updateOracle oracle x = do
-    m <- findOracle oracle
-    let c = Constraints.mustPayToTheScript x $ assetClassValue (oracleAsset oracle) 1
+    m <- findGameOutput game
     case m of
-        Nothing -> do
-            ledgerTx <- submitTxConstraints (typedOracleValidator oracle) c
-            awaitTxConfirmed $ txId ledgerTx
-            logInfo @String $ "set initial oracle value to " ++ show x
-        Just (oref, o,  _) -> do
-            let lookups = Constraints.unspentOutputs (Map.singleton oref o)     <>
-                          Constraints.typedValidatorLookups (typedOracleValidator oracle) <>
-                          Constraints.otherScript (oracleValidator oracle)
-                tx      = c <> Constraints.mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData Update)
-            ledgerTx <- submitTxConstraintsWith @Oracling lookups tx
-            awaitTxConfirmed $ txId ledgerTx
-            logInfo @String $ "updated oracle value to " ++ show x
+        Just (oref, o, GameDatum bs Nothing) -> do
+            logInfo @String "running game found"
+            now <- currentTime
+            let token   = assetClassValue (gToken game) 1
+            let v       = let x = lovelaceValueOf (spStake sp) in x <> x <> token
+                c       = spChoice sp
+                lookups = Constraints.unspentOutputs (Map.singleton oref o)                                   <>
+                          Constraints.otherScript (gameValidator game)                                        <>
+                          Constraints.typedValidatorLookups (typedGameValidator game)
+                tx      = Constraints.mustSpendScriptOutput oref (Redeemer $ PlutusTx.toBuiltinData $ Play c) <>
+                          Constraints.mustPayToTheScript (GameDatum bs $ Just c) v                            <>
+                          Constraints.mustValidateIn (to now)
+            ledgerTx <- submitTxConstraintsWith @Gaming lookups tx
+            let tid = txId ledgerTx
+            void $ awaitTxConfirmed tid
+            logInfo @String $ "made second move: " ++ show (spChoice sp)
 
-findOracle :: forall w s. Oracle -> Contract w s Text (Maybe (TxOutRef, TxOutTx, Integer))
-findOracle oracle = do
-    utxos <- Map.filter f <$> utxoAt (oracleAddress oracle)
-    return $ case Map.toList utxos of
-        [(oref, o)] -> do
-            x <- oracleValue (txOutTxOut o) $ \dh -> Map.lookup dh $ txData $ txOutTxTx o
-            return (oref, o, x)
-        _           -> Nothing
-  where
-    f :: TxOutTx -> Bool
-    f o = assetClassValueOf (txOutValue $ txOutTxOut o) (oracleAsset oracle) == 1
+            waitUntilTimeHasPassed $ spRevealDeadline sp
 
-type OracleSchema = Endpoint "update" Integer
+            m'   <- findGameOutput game
+            now' <- currentTime
+            case m' of
+                Nothing             -> logInfo @String "first player won"
+                Just (oref', o', _) -> do
+                    logInfo @String "first player didn't reveal"
+                    let lookups' = Constraints.unspentOutputs (Map.singleton oref' o')                                     <>
+                                   Constraints.otherScript (gameValidator game)
+                        tx'      = Constraints.mustSpendScriptOutput oref' (Redeemer $ PlutusTx.toBuiltinData ClaimSecond) <>
+                                   Constraints.mustValidateIn (from now')                                                  <>
+                                   Constraints.mustPayToPubKey (spFirst sp) token
+                    ledgerTx' <- submitTxConstraintsWith @Gaming lookups' tx'
+                    void $ awaitTxConfirmed $ txId ledgerTx'
+                    logInfo @String "second player won"
+
+        _ -> logInfo @String "no running game found"
 ```
-- _runOracle_:
+
+## Endpoints
+- Para facilitar el uso de las funciones creamos unos _endpoints_ que se ejecutan uno detrás de otro (_first_, second_)
+  
 ```haskell
-runOracle :: OracleParams -> Contract (Last Oracle) OracleSchema Text ()
-runOracle op = do
-    oracle <- startOracle op
-    tell $ Last $ Just oracle
-    go oracle
+type GameSchema = Endpoint "first" FirstParams .\/ Endpoint "second" SecondParams
+
+endpoints :: Contract () GameSchema Text ()
+endpoints = (first `select` second) >> endpoints
   where
-    go :: Oracle -> Contract (Last Oracle) OracleSchema Text a
-    go oracle = do
-        x <- endpoint @"update"
-        updateOracle oracle x
-        go oracle
+    first  = endpoint @"first"  >>= firstGame
+    second = endpoint @"second" >>= secondGame
 ```
-- _tell_ permite comunicar datos fuera de un contrato. Recibe una  mónada.
-    - _Last_: devuelve el último valor, en este caso, el valor del oráculo.
 
-    
-# Contrato: Swap.hs
-- Contrato para intercambiar ADA/USDT.
-- Me remito a las notas en inglés. Es un proceso complejo. Mas adelante lo revisaré.
+# Probando: Test.hs
 
-# Fondos: Funds.hs
-- Es un bucle que muestra los fondos de nuestro monedero.
+- Los resultados de la ejecución serían
 
-# Pruebas: Test.hs
-- Fijamos las monedas (USDT)
-- Preparamos los monederos con dinero en Lovelaces y USDT (100M)
-
-## Resultado
 ```
-test
-Slot 00000: TxnValidate 67305e557c83d950979655861b470d7d1df6dac87883999662ad2ec521334698
+Slot 00000: TxnValidate 9ed034bd9c98d2b1ff0b8b4c9a692868c10f38985391667ab34e1cd17056e1fc
 Slot 00000: SlotAdd Slot 1
+Slot 00001: *** USER LOG: first move: Zero, second move: Zero
 Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
   Contract instance started
-Slot 00001: W1: TxSubmit: e07f3c549f071d3d9c02e2b90c1a18ecd4bcf16bce2b4889697abf10b6be7b3f
-Slot 00001: TxnValidate e07f3c549f071d3d9c02e2b90c1a18ecd4bcf16bce2b4889697abf10b6be7b3f
+Slot 00001: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'first' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "first")]),Object (fromList [("unEndpointValue",Object (fromList [("fpChoice",String "Zero"),("fpCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("fpNonce",String "5345435245544e4f4e4345"),("fpPlayDeadline",Number 1.596059096e12),("fpRevealDeadline",Number 1.596059101e12),("fpSecond",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")])),("fpStake",Number 5000000.0),("fpTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: W1: TxSubmit: 6bab990b4317fe6d2d8417d04395b7967d8d2b094a36f4a9cdbe46321bd615cc
+Slot 00001: TxnValidate 6bab990b4317fe6d2d8417d04395b7967d8d2b094a36f4a9cdbe46321bd615cc
 Slot 00001: SlotAdd Slot 2
-Slot 00002: *** CONTRACT LOG: "started oracle Oracle {oSymbol = 5bd6aba4c7600ee7fec421308bf39488cbdc6ea6e13bb7acb015681c, oOperator = 35dedd2982a03cf39e7dce03c839994ffdec2ec6b04f1cf2d40e61a3, oFee = 1000000, oAsset = (ff,\"USDT\")}"
-Slot 00002: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
-  Sending contract state to Thread 0
-Slot 00002: *** USER LOG: Oracle {oSymbol = 5bd6aba4c7600ee7fec421308bf39488cbdc6ea6e13bb7acb015681c, oOperator = 35dedd2982a03cf39e7dce03c839994ffdec2ec6b04f1cf2d40e61a3, oFee = 1000000, oAsset = (ff,"USDT")}
-Slot 00002: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
-  Contract instance started
-Slot 00002: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
-  Receive endpoint call on 'update' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "update")]),Object (fromList [("unEndpointValue",Number 1500000.0)])]),("tag",String "ExposeEndpointResp")])
-Slot 00002: W1: TxSubmit: d31619b49698664c53ad08ac7699c4c8959f5f3de7f4ddb5bd9abc4205161525
-Slot 00002: TxnValidate d31619b49698664c53ad08ac7699c4c8959f5f3de7f4ddb5bd9abc4205161525
+Slot 00002: *** CONTRACT LOG: "made first move: Zero"
+Slot 00002: *** CONTRACT LOG: "current slot: Slot {getSlot = 2}, waiting until POSIXTime {getPOSIXTime = 1596059096000}"
 Slot 00002: SlotAdd Slot 3
-Slot 00003: *** CONTRACT LOG: "Oracle value: 1500000"
-Slot 00003: *** CONTRACT LOG: "set initial oracle value to 1500000"
 Slot 00003: SlotAdd Slot 4
-Slot 00004: *** CONTRACT LOG: "Oracle value: 1500000"
+Slot 00004: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Receive endpoint call on 'second' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "second")]),Object (fromList [("unEndpointValue",Object (fromList [("spChoice",String "Zero"),("spCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("spFirst",Object (fromList [("getPubKeyHash",String "35dedd2982a03cf39e7dce03c839994ffdec2ec6b04f1cf2d40e61a3")])),("spPlayDeadline",Number 1.596059096e12),("spRevealDeadline",Number 1.596059101e12),("spStake",Number 5000000.0),("spTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00004: *** CONTRACT LOG: "running game found"
+Slot 00004: W2: TxSubmit: f2cfec9a8e717116682c3453d55b86d41bd4ae3b220d31586eb66ecdc8aa7472
+Slot 00004: TxnValidate f2cfec9a8e717116682c3453d55b86d41bd4ae3b220d31586eb66ecdc8aa7472
 Slot 00004: SlotAdd Slot 5
-Slot 00005: 00000000-0000-4000-8000-000000000002 {Contract instance for wallet 1}:
-  Contract instance started
-Slot 00005: 00000000-0000-4000-8000-000000000003 {Contract instance for wallet 3}:
-  Contract instance started
-Slot 00005: 00000000-0000-4000-8000-000000000004 {Contract instance for wallet 4}:
-  Contract instance started
-Slot 00005: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00005: 00000000-0000-4000-8000-000000000005 {Contract instance for wallet 5}:
-  Contract instance started
-Slot 00005: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00005: 00000000-0000-4000-8000-000000000006 {Contract instance for wallet 3}:
-  Contract instance started
-Slot 00005: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00005: 00000000-0000-4000-8000-000000000007 {Contract instance for wallet 4}:
-  Contract instance started
-Slot 00005: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00005: 00000000-0000-4000-8000-000000000008 {Contract instance for wallet 5}:
-  Contract instance started
-Slot 00005: *** CONTRACT LOG: "Oracle value: 1500000"
-Slot 00005: 00000000-0000-4000-8000-000000000006 {Contract instance for wallet 3}:
-  Receive endpoint call on 'offer' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "offer")]),Object (fromList [("unEndpointValue",Number 1.0e7)])]),("tag",String "ExposeEndpointResp")])
-Slot 00005: W3: TxSubmit: e6558c0f6030abaf6ed3588c4eb5d1839941fa00588e593a69346d1d9510f545
-Slot 00005: 00000000-0000-4000-8000-000000000007 {Contract instance for wallet 4}:
-  Receive endpoint call on 'offer' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "offer")]),Object (fromList [("unEndpointValue",Number 2.0e7)])]),("tag",String "ExposeEndpointResp")])
-Slot 00005: W4: TxSubmit: 57df98687327666249f80c2d671d41afaf5d2285ee2fe34f72832f9095a0d212
-Slot 00005: TxnValidate 57df98687327666249f80c2d671d41afaf5d2285ee2fe34f72832f9095a0d212
-Slot 00005: TxnValidate e6558c0f6030abaf6ed3588c4eb5d1839941fa00588e593a69346d1d9510f545
+Slot 00005: *** CONTRACT LOG: "made second move: Zero"
+Slot 00005: *** CONTRACT LOG: "current slot: Slot {getSlot = 5}, waiting until POSIXTime {getPOSIXTime = 1596059101000}"
 Slot 00005: SlotAdd Slot 6
-Slot 00006: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00006: *** CONTRACT LOG: "offered 10000000 lovelace for swap"
-Slot 00006: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00006: *** CONTRACT LOG: "offered 20000000 lovelace for swap"
-Slot 00006: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",100000000)]"
-Slot 00006: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00006: *** CONTRACT LOG: "Oracle value: 1500000"
+Slot 00006: *** CONTRACT LOG: "waited until: Slot {getSlot = 6}"
+Slot 00006: *** CONTRACT LOG: "second player played and lost"
+Slot 00006: W1: TxSubmit: 22a66195fbe46f2a48f6d83998a34f0de3e824a006e20cc77bcc871f94334446
+Slot 00006: TxnValidate 22a66195fbe46f2a48f6d83998a34f0de3e824a006e20cc77bcc871f94334446
 Slot 00006: SlotAdd Slot 7
-Slot 00007: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00007: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00007: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",100000000)]"
-Slot 00007: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00007: *** CONTRACT LOG: "Oracle value: 1500000"
+Slot 00007: *** CONTRACT LOG: "victory"
 Slot 00007: SlotAdd Slot 8
-Slot 00008: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00008: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00008: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",100000000)]"
-Slot 00008: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00008: *** CONTRACT LOG: "Oracle value: 1500000"
-Slot 00008: 00000000-0000-4000-8000-000000000008 {Contract instance for wallet 5}:
-  Receive endpoint call on 'use' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "use")]),Object (fromList [("unEndpointValue",Array [])])]),("tag",String "ExposeEndpointResp")])
-Slot 00008: *** CONTRACT LOG: "own funds: [(,\"\",100000000),(ff,\"USDT\",100000000)]"
-Slot 00008: *** CONTRACT LOG: "available assets: 100000000"
-Slot 00008: *** CONTRACT LOG: "found oracle, exchange rate 1500000"
-Slot 00008: W5: TxSubmit: a581e562b2005b48331d66bec3931d468fb6d930490f5420c73bddc7b25e7970
-Slot 00008: TxnValidate a581e562b2005b48331d66bec3931d468fb6d930490f5420c73bddc7b25e7970
 Slot 00008: SlotAdd Slot 9
-Slot 00009: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00009: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00009: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00009: *** CONTRACT LOG: "made swap with price [(ff,\"USDT\",30000000)]"
-Slot 00009: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00009: *** CONTRACT LOG: "Oracle value: 1500000"
 Slot 00009: SlotAdd Slot 10
-Slot 00010: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00010: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00010: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00010: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00010: *** CONTRACT LOG: "Oracle value: 1500000"
 Slot 00010: SlotAdd Slot 11
-Slot 00011: *** CONTRACT LOG: "own funds: [(,\"\",99990246),(ff,\"USDT\",100000000)]"
-Slot 00011: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00011: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00011: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00011: *** CONTRACT LOG: "Oracle value: 1500000"
-Slot 00011: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
-  Receive endpoint call on 'update' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "update")]),Object (fromList [("unEndpointValue",Number 1700000.0)])]),("tag",String "ExposeEndpointResp")])
-Slot 00011: W1: TxSubmit: 5552d32ed422c7a849ed45829ffa7c326fe185562ac7a2ec57c6b7ad17d7b878
-Slot 00011: TxnValidate 5552d32ed422c7a849ed45829ffa7c326fe185562ac7a2ec57c6b7ad17d7b878
+Slot 00011: *** CONTRACT LOG: "waited until: Slot {getSlot = 11}"
+Slot 00011: *** CONTRACT LOG: "first player won"
 Slot 00011: SlotAdd Slot 12
-Slot 00012: *** CONTRACT LOG: "own funds: [(,\"\",100978827),(ff,\"USDT\",100000000)]"
-Slot 00012: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00012: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00012: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00012: *** CONTRACT LOG: "Oracle value: 1700000"
-Slot 00012: *** CONTRACT LOG: "updated oracle value to 1700000"
 Slot 00012: SlotAdd Slot 13
-Slot 00013: *** CONTRACT LOG: "own funds: [(,\"\",100978827),(ff,\"USDT\",100000000)]"
-Slot 00013: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00013: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00013: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00013: *** CONTRACT LOG: "Oracle value: 1700000"
 Slot 00013: SlotAdd Slot 14
-Slot 00014: *** CONTRACT LOG: "own funds: [(,\"\",100978827),(ff,\"USDT\",100000000)]"
-Slot 00014: *** CONTRACT LOG: "own funds: [(,\"\",89999990),(ff,\"USDT\",100000000)]"
-Slot 00014: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00014: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00014: *** CONTRACT LOG: "Oracle value: 1700000"
-Slot 00014: 00000000-0000-4000-8000-000000000008 {Contract instance for wallet 5}:
-  Receive endpoint call on 'use' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "use")]),Object (fromList [("unEndpointValue",Array [])])]),("tag",String "ExposeEndpointResp")])
-Slot 00014: *** CONTRACT LOG: "own funds: [(,\"\",118977235),(ff,\"USDT\",70000000)]"
-Slot 00014: *** CONTRACT LOG: "available assets: 70000000"
-Slot 00014: *** CONTRACT LOG: "found oracle, exchange rate 1700000"
-Slot 00014: W5: TxSubmit: 6c74b88ef25dda50383cc84a8c2cc8c61a6d220c4203bc7def1fbfff1beb055f
-Slot 00014: TxnValidate 6c74b88ef25dda50383cc84a8c2cc8c61a6d220c4203bc7def1fbfff1beb055f
 Slot 00014: SlotAdd Slot 15
-Slot 00015: *** CONTRACT LOG: "own funds: [(,\"\",100978827),(ff,\"USDT\",100000000)]"
-Slot 00015: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00015: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00015: *** CONTRACT LOG: "made swap with price [(ff,\"USDT\",17000000)]"
-Slot 00015: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00015: *** CONTRACT LOG: "Oracle value: 1700000"
-Slot 00015: SlotAdd Slot 16
-Slot 00016: *** CONTRACT LOG: "own funds: [(,\"\",100978827),(ff,\"USDT\",100000000)]"
-Slot 00016: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00016: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00016: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00016: *** CONTRACT LOG: "Oracle value: 1700000"
-Slot 00016: SlotAdd Slot 17
-Slot 00017: *** CONTRACT LOG: "own funds: [(,\"\",100978827),(ff,\"USDT\",100000000)]"
-Slot 00017: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00017: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00017: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00017: *** CONTRACT LOG: "Oracle value: 1700000"
-Slot 00017: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
-  Receive endpoint call on 'update' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "update")]),Object (fromList [("unEndpointValue",Number 1800000.0)])]),("tag",String "ExposeEndpointResp")])
-Slot 00017: W1: TxSubmit: 47aa2375f10483c8cd66fe034e3b3305a4de93a3fec10ab4fbee3b866b32c348
-Slot 00017: TxnValidate 47aa2375f10483c8cd66fe034e3b3305a4de93a3fec10ab4fbee3b866b32c348
-Slot 00017: SlotAdd Slot 18
-Slot 00018: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00018: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00018: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00018: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00018: *** CONTRACT LOG: "Oracle value: 1800000"
-Slot 00018: *** CONTRACT LOG: "updated oracle value to 1800000"
-Slot 00018: SlotAdd Slot 19
-Slot 00019: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00019: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00019: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00019: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00019: *** CONTRACT LOG: "Oracle value: 1800000"
-Slot 00019: SlotAdd Slot 20
-Slot 00020: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00020: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00020: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00020: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00020: *** CONTRACT LOG: "Oracle value: 1800000"
-Slot 00020: 00000000-0000-4000-8000-000000000006 {Contract instance for wallet 3}:
-  Receive endpoint call on 'retrieve' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "retrieve")]),Object (fromList [("unEndpointValue",Array [])])]),("tag",String "ExposeEndpointResp")])
-Slot 00020: *** CONTRACT LOG: "no swaps found"
-Slot 00020: 00000000-0000-4000-8000-000000000007 {Contract instance for wallet 4}:
-  Receive endpoint call on 'retrieve' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "retrieve")]),Object (fromList [("unEndpointValue",Array [])])]),("tag",String "ExposeEndpointResp")])
-Slot 00020: *** CONTRACT LOG: "no swaps found"
-Slot 00020: SlotAdd Slot 21
-Slot 00021: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00021: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00021: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00021: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00021: *** CONTRACT LOG: "Oracle value: 1800000"
-Slot 00021: SlotAdd Slot 22
-Slot 00022: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00022: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00022: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00022: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00022: *** CONTRACT LOG: "Oracle value: 1800000"
-Slot 00022: SlotAdd Slot 23
-Slot 00023: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00023: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00023: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00023: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
-Slot 00023: *** CONTRACT LOG: "Oracle value: 1800000"
-Slot 00023: SlotAdd Slot 24
-Slot 00024: *** CONTRACT LOG: "own funds: [(,\"\",101967408),(ff,\"USDT\",100000000)]"
-Slot 00024: *** CONTRACT LOG: "own funds: [(ff,\"USDT\",117000000),(,\"\",89999990)]"
-Slot 00024: *** CONTRACT LOG: "own funds: [(,\"\",79999990),(ff,\"USDT\",130000000)]"
-Slot 00024: *** CONTRACT LOG: "own funds: [(,\"\",127954470),(ff,\"USDT\",53000000)]"
 Final balances
 Wallet 1: 
-    {, ""}: 101967408
-    {ff, "USDT"}: 100000000
+    {, ""}: 1004984215
+    {ff, "STATE TOKEN"}: 1
 Wallet 2: 
-    {, ""}: 100000000
-    {ff, "USDT"}: 100000000
-Wallet 3: 
-    {, ""}: 89999990
-    {ff, "USDT"}: 117000000
-Wallet 4: 
-    {ff, "USDT"}: 130000000
-    {, ""}: 79999990
-Wallet 5: 
-    {, ""}: 127954470
-    {ff, "USDT"}: 53000000
-Wallet 6: 
-    {, ""}: 100000000
-    {ff, "USDT"}: 100000000
-Wallet 7: 
-    {, ""}: 100000000
-    {ff, "USDT"}: 100000000
-Wallet 8: 
-    {, ""}: 100000000
-    {ff, "USDT"}: 100000000
-Wallet 9: 
-    {, ""}: 100000000
-    {ff, "USDT"}: 100000000
-Wallet 10: 
-    {, ""}: 100000000
-    {ff, "USDT"}: 100000000
-Script 276678f8c1954db1183f3c8dce02593b7e777b77dbb27ff5477afdb1: 
-    {5bd6aba4c7600ee7fec421308bf39488cbdc6ea6e13bb7acb015681c, ""}: 1
-
+    {, ""}: 994984225
+Slot 00000: TxnValidate 9ed034bd9c98d2b1ff0b8b4c9a692868c10f38985391667ab34e1cd17056e1fc
+Slot 00000: SlotAdd Slot 1
+Slot 00001: *** USER LOG: first move: Zero, second move: One
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'first' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "first")]),Object (fromList [("unEndpointValue",Object (fromList [("fpChoice",String "Zero"),("fpCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("fpNonce",String "5345435245544e4f4e4345"),("fpPlayDeadline",Number 1.596059096e12),("fpRevealDeadline",Number 1.596059101e12),("fpSecond",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")])),("fpStake",Number 5000000.0),("fpTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: W1: TxSubmit: 6bab990b4317fe6d2d8417d04395b7967d8d2b094a36f4a9cdbe46321bd615cc
+Slot 00001: TxnValidate 6bab990b4317fe6d2d8417d04395b7967d8d2b094a36f4a9cdbe46321bd615cc
+Slot 00001: SlotAdd Slot 2
+Slot 00002: *** CONTRACT LOG: "made first move: Zero"
+Slot 00002: *** CONTRACT LOG: "current slot: Slot {getSlot = 2}, waiting until POSIXTime {getPOSIXTime = 1596059096000}"
+Slot 00002: SlotAdd Slot 3
+Slot 00003: SlotAdd Slot 4
+Slot 00004: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Receive endpoint call on 'second' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "second")]),Object (fromList [("unEndpointValue",Object (fromList [("spChoice",String "One"),("spCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("spFirst",Object (fromList [("getPubKeyHash",String "35dedd2982a03cf39e7dce03c839994ffdec2ec6b04f1cf2d40e61a3")])),("spPlayDeadline",Number 1.596059096e12),("spRevealDeadline",Number 1.596059101e12),("spStake",Number 5000000.0),("spTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00004: *** CONTRACT LOG: "running game found"
+Slot 00004: W2: TxSubmit: 23ac5f235ec564975de4bb66790179429e19eb5666caaa792fb296e1c289943f
+Slot 00004: TxnValidate 23ac5f235ec564975de4bb66790179429e19eb5666caaa792fb296e1c289943f
+Slot 00004: SlotAdd Slot 5
+Slot 00005: *** CONTRACT LOG: "made second move: One"
+Slot 00005: *** CONTRACT LOG: "current slot: Slot {getSlot = 5}, waiting until POSIXTime {getPOSIXTime = 1596059101000}"
+Slot 00005: SlotAdd Slot 6
+Slot 00006: *** CONTRACT LOG: "waited until: Slot {getSlot = 6}"
+Slot 00006: *** CONTRACT LOG: "second player played and won"
+Slot 00006: SlotAdd Slot 7
+Slot 00007: SlotAdd Slot 8
+Slot 00008: SlotAdd Slot 9
+Slot 00009: SlotAdd Slot 10
+Slot 00010: SlotAdd Slot 11
+Slot 00011: *** CONTRACT LOG: "waited until: Slot {getSlot = 11}"
+Slot 00011: *** CONTRACT LOG: "first player didn't reveal"
+Slot 00011: W2: TxSubmit: 15c5e6c74b8192bc9d3c3232cd30a21378a8b3c640a5559ccce6188d8f3776db
+Slot 00011: TxnValidate 15c5e6c74b8192bc9d3c3232cd30a21378a8b3c640a5559ccce6188d8f3776db
+Slot 00011: SlotAdd Slot 12
+Slot 00012: *** CONTRACT LOG: "second player won"
+Slot 00012: SlotAdd Slot 13
+Slot 00013: SlotAdd Slot 14
+Slot 00014: SlotAdd Slot 15
+Final balances
+Wallet 1: 
+    {, ""}: 994999990
+    {ff, "STATE TOKEN"}: 1
+Wallet 2: 
+    {, ""}: 1004968450
+Slot 00000: TxnValidate 9ed034bd9c98d2b1ff0b8b4c9a692868c10f38985391667ab34e1cd17056e1fc
+Slot 00000: SlotAdd Slot 1
+Slot 00001: *** USER LOG: first move: One, second move: Zero
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'first' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "first")]),Object (fromList [("unEndpointValue",Object (fromList [("fpChoice",String "One"),("fpCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("fpNonce",String "5345435245544e4f4e4345"),("fpPlayDeadline",Number 1.596059096e12),("fpRevealDeadline",Number 1.596059101e12),("fpSecond",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")])),("fpStake",Number 5000000.0),("fpTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: W1: TxSubmit: 4c3a028a139af9795d3e329d044ec4f6f3355a728951c8dea97d96da004955b4
+Slot 00001: TxnValidate 4c3a028a139af9795d3e329d044ec4f6f3355a728951c8dea97d96da004955b4
+Slot 00001: SlotAdd Slot 2
+Slot 00002: *** CONTRACT LOG: "made first move: One"
+Slot 00002: *** CONTRACT LOG: "current slot: Slot {getSlot = 2}, waiting until POSIXTime {getPOSIXTime = 1596059096000}"
+Slot 00002: SlotAdd Slot 3
+Slot 00003: SlotAdd Slot 4
+Slot 00004: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Receive endpoint call on 'second' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "second")]),Object (fromList [("unEndpointValue",Object (fromList [("spChoice",String "Zero"),("spCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("spFirst",Object (fromList [("getPubKeyHash",String "35dedd2982a03cf39e7dce03c839994ffdec2ec6b04f1cf2d40e61a3")])),("spPlayDeadline",Number 1.596059096e12),("spRevealDeadline",Number 1.596059101e12),("spStake",Number 5000000.0),("spTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00004: *** CONTRACT LOG: "running game found"
+Slot 00004: W2: TxSubmit: 34712cf78d4267c960f1a25a63271d431ab4cc7ddeb5b3dadf6a67e05a7bee91
+Slot 00004: TxnValidate 34712cf78d4267c960f1a25a63271d431ab4cc7ddeb5b3dadf6a67e05a7bee91
+Slot 00004: SlotAdd Slot 5
+Slot 00005: *** CONTRACT LOG: "made second move: Zero"
+Slot 00005: *** CONTRACT LOG: "current slot: Slot {getSlot = 5}, waiting until POSIXTime {getPOSIXTime = 1596059101000}"
+Slot 00005: SlotAdd Slot 6
+Slot 00006: *** CONTRACT LOG: "waited until: Slot {getSlot = 6}"
+Slot 00006: *** CONTRACT LOG: "second player played and won"
+Slot 00006: SlotAdd Slot 7
+Slot 00007: SlotAdd Slot 8
+Slot 00008: SlotAdd Slot 9
+Slot 00009: SlotAdd Slot 10
+Slot 00010: SlotAdd Slot 11
+Slot 00011: *** CONTRACT LOG: "waited until: Slot {getSlot = 11}"
+Slot 00011: *** CONTRACT LOG: "first player didn't reveal"
+Slot 00011: W2: TxSubmit: d390af815479e2a128819db49a6a0547b84d0dad1c60a735a64a59da7eb7e0b8
+Slot 00011: TxnValidate d390af815479e2a128819db49a6a0547b84d0dad1c60a735a64a59da7eb7e0b8
+Slot 00011: SlotAdd Slot 12
+Slot 00012: *** CONTRACT LOG: "second player won"
+Slot 00012: SlotAdd Slot 13
+Slot 00013: SlotAdd Slot 14
+Slot 00014: SlotAdd Slot 15
+Final balances
+Wallet 1: 
+    {ff, "STATE TOKEN"}: 1
+    {, ""}: 994999990
+Wallet 2: 
+    {, ""}: 1004968450
+Slot 00000: TxnValidate 9ed034bd9c98d2b1ff0b8b4c9a692868c10f38985391667ab34e1cd17056e1fc
+Slot 00000: SlotAdd Slot 1
+Slot 00001: *** USER LOG: first move: One, second move: One
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Contract instance started
+Slot 00001: 00000000-0000-4000-8000-000000000000 {Contract instance for wallet 1}:
+  Receive endpoint call on 'first' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "first")]),Object (fromList [("unEndpointValue",Object (fromList [("fpChoice",String "One"),("fpCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("fpNonce",String "5345435245544e4f4e4345"),("fpPlayDeadline",Number 1.596059096e12),("fpRevealDeadline",Number 1.596059101e12),("fpSecond",Object (fromList [("getPubKeyHash",String "977efb35ab621d39dbeb7274ec7795a34708ff4d25a01a1df04c1f27")])),("fpStake",Number 5000000.0),("fpTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00001: W1: TxSubmit: 4c3a028a139af9795d3e329d044ec4f6f3355a728951c8dea97d96da004955b4
+Slot 00001: TxnValidate 4c3a028a139af9795d3e329d044ec4f6f3355a728951c8dea97d96da004955b4
+Slot 00001: SlotAdd Slot 2
+Slot 00002: *** CONTRACT LOG: "made first move: One"
+Slot 00002: *** CONTRACT LOG: "current slot: Slot {getSlot = 2}, waiting until POSIXTime {getPOSIXTime = 1596059096000}"
+Slot 00002: SlotAdd Slot 3
+Slot 00003: SlotAdd Slot 4
+Slot 00004: 00000000-0000-4000-8000-000000000001 {Contract instance for wallet 2}:
+  Receive endpoint call on 'second' for Object (fromList [("contents",Array [Object (fromList [("getEndpointDescription",String "second")]),Object (fromList [("unEndpointValue",Object (fromList [("spChoice",String "One"),("spCurrency",Object (fromList [("unCurrencySymbol",String "ff")])),("spFirst",Object (fromList [("getPubKeyHash",String "35dedd2982a03cf39e7dce03c839994ffdec2ec6b04f1cf2d40e61a3")])),("spPlayDeadline",Number 1.596059096e12),("spRevealDeadline",Number 1.596059101e12),("spStake",Number 5000000.0),("spTokenName",Object (fromList [("unTokenName",String "STATE TOKEN")]))]))])]),("tag",String "ExposeEndpointResp")])
+Slot 00004: *** CONTRACT LOG: "running game found"
+Slot 00004: W2: TxSubmit: e844449a57040e31e5b3107dfbcab4ada8c937f5a2472f7b0b355a40079ddf09
+Slot 00004: TxnValidate e844449a57040e31e5b3107dfbcab4ada8c937f5a2472f7b0b355a40079ddf09
+Slot 00004: SlotAdd Slot 5
+Slot 00005: *** CONTRACT LOG: "made second move: One"
+Slot 00005: *** CONTRACT LOG: "current slot: Slot {getSlot = 5}, waiting until POSIXTime {getPOSIXTime = 1596059101000}"
+Slot 00005: SlotAdd Slot 6
+Slot 00006: *** CONTRACT LOG: "waited until: Slot {getSlot = 6}"
+Slot 00006: *** CONTRACT LOG: "second player played and lost"
+Slot 00006: W1: TxSubmit: cf1e55aa4118ed3747904d97191b5e0c6da6724ff9941d60af5e1f36c7d440ed
+Slot 00006: TxnValidate cf1e55aa4118ed3747904d97191b5e0c6da6724ff9941d60af5e1f36c7d440ed
+Slot 00006: SlotAdd Slot 7
+Slot 00007: *** CONTRACT LOG: "victory"
+Slot 00007: SlotAdd Slot 8
+Slot 00008: SlotAdd Slot 9
+Slot 00009: SlotAdd Slot 10
+Slot 00010: SlotAdd Slot 11
+Slot 00011: *** CONTRACT LOG: "waited until: Slot {getSlot = 11}"
+Slot 00011: *** CONTRACT LOG: "first player won"
+Slot 00011: SlotAdd Slot 12
+Slot 00012: SlotAdd Slot 13
+Slot 00013: SlotAdd Slot 14
+Slot 00014: SlotAdd Slot 15
+Final balances
+Wallet 1: 
+    {, ""}: 1004984215
+    {ff, "STATE TOKEN"}: 1
+Wallet 2: 
+    {, ""}: 994984225
 ```
 
-# Plutus Application Backend: PAB.hs
-- Vamos a crear un ejecutables que ejecute los contratos.
+# Máquina de estados
+- No tiene nada que ver con la _blockchain_.
+> [Wikipedia](https://es.wikipedia.org/wiki/Aut%C3%B3mata_finito) Un autómata finito o máquina de estado finito es un modelo computacional que realiza cómputos en forma automática sobre una entrada para producir una salida. Este modelo está conformado por un alfabeto, un conjunto de estados finito, una función de transición, un estado inicial y un conjunto de estados finales.
+- Podemos considerar el diagrama inicial del juego como una máquina de estados.
+- Además podemos realizar la siguiente analogía:
+    - Los nodos serían los estados.
+    - Las transiciones sería los vértices.
+- En la _blockchain_ la máquina de estados estaría representada por la UTXo asociada a la dirección del script y el estado de la máquina sería el _Datum_ de la UTXo y la transición sería una transacción que consumuría la UTXo actual utilizando un _Redeemer_ y generaría nuevas UTXo asociadas a la misma dirección con un nuevo _Datum_ que sería el nuevo estado de la máquina. 
+    - No tengo claro si habla en plural o en singular. Una transacción puede utilizar varias UTXo y generar varias UTXo. Una máquina solo puede estar en un estado por lo que lo lógico sería tener una única UTXo, como es el caso del ejemplo.
+
+- Las máquinas de estado encajan perfectamente en el tipo de operaciones que se realizan en un contrato. Por eso en **Plutus** soporta su creación mediante un paquete específico.
+
+> **SOLO SON APROPIADAS PARA CONTRATOS CON UNA ÚNICA UTXo**
+
+## Plutus.Contract.StateMachine
+[Doc](https://alpha.marlowe.iohkdev.io/doc/haddock/plutus-contract/html/Plutus-Contract-StateMachine.html)
+
+- Características
+    - Lleva el control automático del NFT que se utiliza para identificar la UTXo asociada al juego.
+
+- Transiciones:
+```haskell
+```
+
+> transition game s r = case (stateValue s, stateData s, r) of
+- _s_: El estado es una UTXo.
+    - _stateValue_: Es el valor de la UTXo
+    - _stateData_ : Es el _Datum_
+    - _r_: Es el _Redeemer_.
 
 
-# Ejercicios
-- Probar el sistema y ejecutar varias operaciones con los clientes dados.
-- Crear clientes (frontends) en otros lenguajes.
-- Añadir varios oráculos, por ejemplo 3, de distintas fuentes.
-    - Una estrategia para calcular el precio sería aquel que esté en el medio, desechando el máximo y el mínimo.
-    - Una restricción sería que los tres estuviesen presentes.
-- Soporte para varios tokens (ETH, BTC)
+
+
+# Tarea
+- Implementar el juego Piedra, Papel, Tijera.
+    - Consejos: 
+        - GameChoice
+        - Beats: quien gana. Atención, hay empate.
+        - Reveal en caso de empate:
+    - ![](./homework_tips.png)
