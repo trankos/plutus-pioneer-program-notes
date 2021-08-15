@@ -201,7 +201,7 @@ mkGameValidator game bsZero' bsOne' dat red ctx =
     3. No hay posibilidades. El resto de combinaciones fallará y no validará la transacción.
 
 
-# Ha jugar
+# A jugar
     - Dos funciones: _firstGame_ y _secondGame_
 
 ## firstGame
