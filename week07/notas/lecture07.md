@@ -2,7 +2,7 @@ Clase 07
 - [Video](https://www.youtube.com/watch?v=uwZ903Zd0DU)
 - [Notas](https://docs.plutus-community.com/docs/lectures/Lecture7.html)
 
-# Máquinas de estados (state Machines)
+# Máquinas de estados (State Machines)
 - También conocidos como máquinas de estado finitas o autómatas. Es un concepto matemático, algebraico, que permite código más compacto. Una máquina de estados se define mediante: 
 > [Wikipedia](https://es.wikipedia.org/wiki/Aut%C3%B3mata_finito) Un autómata finito o máquina de estado finito es un modelo computacional que realiza cómputos en forma automática sobre una entrada para producir una salida. Este modelo está conformado por un alfabeto, un conjunto de estados finito, una función de transición, un estado inicial y un conjunto de estados finales.
 # Ejemplo
